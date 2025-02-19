@@ -17,8 +17,8 @@ else:
 assert cap.isOpened(), "Error reading video file"
 
 # Get properties of the frame.
-w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
 if live_feed == True:
     # If live camera feed, set fps to 30.
@@ -30,18 +30,24 @@ else:
 while cap.isOpened():
     success, frame = cap.read()
     if not success:
-        print("Video frame is empty or video processing has been successfully completed.")
+        print("The video frame is empty or video processing has finished")
         break
     
-    # Run YOLO object detection.
-    results = model(frame)
+    # Run YOLO object detection and tracking.
+    results = model.track(frame, persist=True, tracker="bytetrack.yaml")
 
-    # Draw the bounding box around detected objects.
-    for box in results[0].boxes.xyxy:
-        # Get the coordinates of bounding box.
-        x1, y1, x2, y2 = map(int, box)
-        # Draw the bounding box.
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    # Draw the bounding box around detected objects with tracking IDs.
+    if results[0].boxes is not None:
+        for box, track_id in zip(results[0].boxes.xyxy, results[0].boxes.id):
+            # Get the coordinates of bounding box.
+            x1, y1, x2, y2 = map(int, box)
+            # Draw the bounding box.
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            # Then display the unique ID of the vehicle above bounding box.
+            if track_id is not None:
+                label = f"ID: {int(track_id)}"
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
+                            (255, 255, 255), 2)
 
     # Show the output.
     cv2.imshow('Vehicle Speed Estimation', frame)
