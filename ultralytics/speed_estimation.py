@@ -7,7 +7,7 @@ import numpy as np
 model = YOLO("yolov8m.pt")
 
 # Boolean value deciding if live camera feed will be used.
-live_feed = True
+live_feed = False
 
 if live_feed == True:
     # Chooses live camera feed.
@@ -17,6 +17,16 @@ else:
     cap = cv2.VideoCapture("C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/30road.mp4")
 
 assert cap.isOpened(), "Error reading video file"
+
+# FPS is handled differently for live vs pre recorded video.
+if live_feed == True:
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+    # Enables dynamic fps tracking.
+    dynamic_fps = True
+else:
+    # Use fixed FPS from the video file if pre recorded video.
+    dynamic_fps = False
 
 # Get properties of the frame.
 frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -43,7 +53,7 @@ custom_id_counter = 1
 custom_id_map = {}
 
 # Defining the vertical line where speed is captured - X-Coordinate and minimum number of pixels.
-speed_capture_x = 300
+speed_capture_x = 2700
 speed_capture_threshold = 5
 # Real world distance estimation which can be adjusted based on filming setup.
 real_world_distance_m = 10
@@ -52,10 +62,20 @@ speed_limit = 30
 
 # Process video
 while cap.isOpened():
+    frame_start = time.time()
     success, frame = cap.read()
     if not success:
         print("The video frame is empty or video processing has finished")
         break
+
+    # Handles dynamic fps for live video feed to ensure smooth video feed.
+    if dynamic_fps == True:
+        frame_end = time.time()
+        frame_time = frame_end - frame_start
+        if frame_time > 0:
+            actual_fps = 1.0 / frame_time
+        else:
+            actual_fps = 30
     
     # Run YOLO object detection and tracking.
     results = model.track(frame, persist=True, tracker="bytetrack.yaml")
@@ -72,6 +92,9 @@ while cap.isOpened():
             centre_y = (y1 + y2) / 2
             current_time = time.time()
             track_id = int(track_id)
+
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
 
             # Custom ID is assigned to object. If not, placeholder is set until object crosses line.
             if track_id not in custom_id_map:
