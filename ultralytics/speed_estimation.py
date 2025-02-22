@@ -3,6 +3,8 @@ import cv2
 import time
 import numpy as np
 
+# ------------------ YOLO Model Setup --------------
+
 # Loading the YOLO8m model.
 model = YOLO("yolov8m.pt")
 
@@ -17,6 +19,9 @@ else:
     cap = cv2.VideoCapture("C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/30road.mp4")
 
 assert cap.isOpened(), "Error reading video file"
+
+
+# ------------- Frame Properties, FPS & Video Writer --------------
 
 # FPS is handled differently for live vs pre recorded video.
 if live_feed == True:
@@ -42,6 +47,9 @@ video_writer = None
 if live_feed != True:
     video_writer = cv2.VideoWriter("VehicleSpeedEstimationVideo.avi", cv2.VideoWriter_fourcc(*"mp4v"), fps, (frame_width, frame_height))
 
+
+# ------------- Data Structures for Tracking & Colour Map --------------
+
 # This stores the history of objects.
 object_history = {}
 
@@ -60,6 +68,40 @@ real_world_distance_m = 10
 # Set the speed limit of the clip (in mph)
 speed_limit = 30
 
+# A predefined colour map for detecting colours of objects.
+colour_map = {"black": (0,0,0),
+              "white": (255, 255, 255),
+              "red": (255, 0, 0),
+              "blue": (0,0, 255),
+              "green": (0, 255, 0),
+              "yellow": (255, 255, 0),
+              "orange": (255, 165, 0),
+              "grey": (128, 128, 128),
+              "silver": (192, 192, 192),
+              "brown": (165, 42, 42)
+            }
+
+
+# ------------- Helper Functions --------------
+
+# Function that finds the name of the closest colour.
+def get_closest_colour(rgb):
+    # The minimum distance is set to infinity at first to ensure real distance is smaller.
+    min_distance = float("inf")
+    # Default used if no colour match is found.
+    closest_colour = "unknown"
+    for colour_name, rgb_code in colour_map.items():
+        # Uses the Euclidean distance between the pixel RGB and the colour currently iterating through.
+        distance = np.linalg.norm(np.array(rgb) - np.array(rgb_code))
+        # If the distance is smaller than the current minimum, the colour is updated.
+        if distance < min_distance:
+            min_distance = distance
+            closest_colour = colour_name
+    return closest_colour
+
+
+# -------------- Main Processing Loop --------------
+
 # Process video
 while cap.isOpened():
     frame_start = time.time()
@@ -77,6 +119,8 @@ while cap.isOpened():
         else:
             actual_fps = 30
     
+    # -------------- YOLO Object Detection & Tracking --------------
+
     # Run YOLO object detection and tracking.
     results = model.track(frame, persist=True, tracker="bytetrack.yaml")
 
@@ -85,13 +129,31 @@ while cap.isOpened():
 
     # Draw the bounding box around detected objects with tracking IDs.
     if results[0].boxes is not None and results[0].boxes.id is not None:
-        for box, track_id in zip(results[0].boxes.xyxy, results[0].boxes.id):
+        for box, track_id, class_id in zip(results[0].boxes.xyxy, results[0].boxes.id, results[0].boxes.cls):
             # Get the coordinates of bounding box.
             x1, y1, x2, y2 = map(int, box)
             centre_x = (x1 + x2) / 2
             centre_y = (y1 + y2) / 2
             current_time = time.time()
             track_id = int(track_id)
+
+            # Using YOLO label given to object, extract vehicle type.
+            detected_class = model.names[int(class_id)]
+            # Checks if YOLO detected a valid class, and if not, labels it as "uknown"
+            if detected_class:
+                vehicle_type = detected_class
+            else:
+                detected_class = "unknown"
+
+            # Using the midpoint pixel of the bounding box, the vehicles colour is approximated.
+            mid_x, mid_y = (x1+ x2) // 2, (y1 + y2) // 2
+            if 0 <= mid_y < frame_height and 0 <= mid_x < frame_width:
+                # Gets the RGB value from the centre pixel of the bounding box.
+                pixel_rgb = frame[mid_y, mid_x]
+            else:
+                # If midpoint is outside the frame, sets to default of black.
+                pixel_rgb = (0, 0,0)
+            vehicle_colour = get_closest_colour(pixel_rgb)
 
             # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
@@ -102,7 +164,7 @@ while cap.isOpened():
 
             # If not in the object history, add to the dictionary.
             if track_id not in object_history:
-                object_history[track_id] = {"positions": [], "speed": None, "crossed": False}
+                object_history[track_id] = {"positions": [], "speed": None, "crossed": False, "type": vehicle_type, "colour": vehicle_colour}
 
             # Store the objects movement history.
             object_history[track_id]["positions"].append((centre_x, centre_y, current_time))
@@ -140,17 +202,18 @@ while cap.isOpened():
                         object_history[track_id]["speed"] = object_speed_mph
                         object_history[track_id]["crossed"] = True
 
-                        # Speed details of the vehicle are logged and added to the file.
+                        # Speed details of the vehicle are logged and added to the log file.
                         object_speed_entry = (
                             f"⏱ Time: {time.strftime('%Y-%m-%d %H:%M:%S')} | "
-                            f"ID: {custom_id} | Speed: {object_speed_mph:.2f} mph"
+                            f"ID: {custom_id} | Speed: {object_speed_mph:.2f} mph | "
+                            f"Type: {vehicle_type} | Colour: {vehicle_colour}"
                         )
                         speed_log.append(object_speed_entry)
 
 
-            # Then display the unique ID and speed of the vehicle above bounding box.
+            # Then display the unique ID, speed, type, and colour of the vehicle above bounding box.
             if object_history[track_id]["speed"] is not None:
-                label = f"ID: {custom_id}, {int(object_speed_mph)} mph"
+                label = f"ID: {custom_id}, Speed: {int(object_speed_mph)} mph, Type: {vehicle_type}, Colour: {vehicle_colour}"
 
                 # Set colour of the bounding box based on the speed of the vehicle.
                 if object_speed_mph <= speed_limit:
@@ -162,6 +225,8 @@ while cap.isOpened():
                             (255, 255, 255), 2)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
 
+    # --------------- Show & save Frame --------------
+
     # Show the output.
     cv2.imshow('Vehicle Speed Estimation', frame)
 
@@ -172,6 +237,9 @@ while cap.isOpened():
     # Allows user to press 'q' to exit the video feed from the model.
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+
+
+# ------------ Cleanup and Save Logs --------------
 
 # Speed log is saved to a text file
 with open("speed_log.txt", "w", encoding="utf-8") as f:
