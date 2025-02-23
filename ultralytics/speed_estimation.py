@@ -68,9 +68,9 @@ real_world_distance_m = 10
 # Set the speed limit of the clip (in mph)
 speed_limit = 30
 
-# A predefined colour map for detecting colours of objects.
-colour_map = {"black": (0,0,0),
-              "white": (255, 255, 255),
+# A predefined colour map for detecting colours of objects (black & white adjusted for shadows).
+colour_map = {"black": (20,20,20),
+              "white": (245, 245, 245),
               "red": (255, 0, 0),
               "blue": (0,0, 255),
               "green": (0, 255, 0),
@@ -122,7 +122,7 @@ while cap.isOpened():
     # -------------- YOLO Object Detection & Tracking --------------
 
     # Run YOLO object detection and tracking.
-    results = model.track(frame, persist=True, tracker="bytetrack.yaml")
+    results = model.track(frame, persist=True, tracker="bytetrack.yaml", conf=0.65)
 
     # Speed capture line defined above is drawn on the video.
     cv2.line(frame, (speed_capture_x, 0), (speed_capture_x, frame_height), (0, 255, 255), 2)
@@ -139,21 +139,32 @@ while cap.isOpened():
 
             # Using YOLO label given to object, extract vehicle type.
             detected_class = model.names[int(class_id)]
-            # Checks if YOLO detected a valid class, and if not, labels it as "uknown"
-            if detected_class:
-                vehicle_type = detected_class
+            
+            # Checks if the vehicle type is already assigned or type is unknown.
+            if track_id not in object_history or object_history[track_id]['type'] == "unknown":
+                # Then checks if YOLO detected a valid class, and if not, labels it as "uknown"
+                if detected_class:
+                    vehicle_type = detected_class
+                else:
+                    detected_class = "unknown"
             else:
-                detected_class = "unknown"
+                # Keeps existing vehicle type
+                vehicle_type = object_history[track_id]['type']
 
-            # Using the midpoint pixel of the bounding box, the vehicles colour is approximated.
-            mid_x, mid_y = (x1+ x2) // 2, (y1 + y2) // 2
-            if 0 <= mid_y < frame_height and 0 <= mid_x < frame_width:
-                # Gets the RGB value from the centre pixel of the bounding box.
-                pixel_rgb = frame[mid_y, mid_x]
+            # Checks if the vehicle colour is already assigned or is unknown.
+            if track_id not in object_history or object_history[track_id]['colour'] == "unknown":
+                # Using the midpoint pixel of the bounding box, the vehicles colour is approximated.
+                mid_x, mid_y = (x1+ x2) // 2, (y1 + y2) // 2
+                if 0 <= mid_y < frame_height and 0 <= mid_x < frame_width:
+                    # Gets the RGB value from the centre pixel of the bounding box.
+                    pixel_rgb = frame[mid_y, mid_x]
+                else:
+                    # If midpoint is outside the frame, sets to default of black.
+                    pixel_rgb = (0, 0,0)
+                vehicle_colour = get_closest_colour(pixel_rgb)
             else:
-                # If midpoint is outside the frame, sets to default of black.
-                pixel_rgb = (0, 0,0)
-            vehicle_colour = get_closest_colour(pixel_rgb)
+                # Keeps existing colour of vehicle.
+                vehicle_colour = object_history[track_id]['colour']
 
             # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
@@ -213,7 +224,7 @@ while cap.isOpened():
 
             # Then display the unique ID, speed, type, and colour of the vehicle above bounding box.
             if object_history[track_id]["speed"] is not None:
-                label = f"ID: {custom_id}, Speed: {int(object_speed_mph)} mph, Type: {vehicle_type}, Colour: {vehicle_colour}"
+                label = f"ID: {custom_id_map.get(track_id)}, Speed: {object_history[track_id]['speed']:.2f} mph, Type: {object_history[track_id]['type']}, Colour: {object_history[track_id]['colour']}"
 
                 # Set colour of the bounding box based on the speed of the vehicle.
                 if object_speed_mph <= speed_limit:
