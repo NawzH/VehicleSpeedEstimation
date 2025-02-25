@@ -88,26 +88,34 @@ colour_map = {"black": (20,20,20),
 
 # --------- Loading Data from OBD Export (For Pre-Recorded) ----------
 def load_obd_data(csv_file):
+    # Stores the valid OBD data rows.
     data = []
+    # Opens the CSV file.
     with open(csv_file, mode="r", encoding='utf8') as file:
         reader = csv.reader(file)
         rows = list(reader)
 
-    # Processes headers in the file
+    # Processes headers in the file (second row) and strips any whitespace
     header = [h.strip() for h in rows[1] if h.strip() != '']
 
-    # Begin to iterate over actual OBD data rows
+    # Begin to iterate over actual OBD data rows.
     for row in rows[2:]:
+        # Skips any malformed rows where the number of elements doesn't match the header
         if len(row) != len(header):
             continue
-
+        
+        # Creates a dictionary where the header names are mapped to row data.
         row_data = dict(zip(header,row))
+        # Cleans and parses the LocalTime field from the row data.
         local_time_raw = row_data.get('LocalTime', '').replace('="', '').replace('"', '')
         try:
+            # Converts LocalTime string to a datetime object.
             local_time = datetime.strptime(local_time_raw, "%Y-%m-%d %H:%M:%S.%f")
+            # Defaults to 0 if empty or malformed
             speed = float(row_data.get('Speed[16]  (MPH)', '0').strip())
             data.append({'LocalTime': local_time, 'Speed': speed})
         except ValueError:
+            # Skips rows with invalid date or speed format
             continue
 
     print(f"loaded {len(data)} valid speeds from CSV") 
@@ -120,14 +128,16 @@ if not obd_data:
     print("No valid OBD data found")
     exit()
 
-# Get the video start time (using creation time)
+# Get the video start time (using file's last modification timestamp)
 video_start_time = datetime.fromtimestamp(os.path.getmtime(video_path))
 print(f"Video start time: {video_start_time}")
 
+# Iterates through the OBD data to find the starting point that matches the video start time
 obd_index = 0
 while obd_index < len(obd_data) and obd_data[obd_index]['LocalTime'] < video_start_time:
     obd_index += 1
 
+# If a date isn't found that matches, exit.
 if obd_index == len(obd_data):
     print("No matching OBD data or incorrect creation time for the chosen video.")
     exit()
@@ -171,13 +181,16 @@ while cap.isOpened() and obd_index < len(obd_data):
         else:
             actual_fps = 30
 
-    # This calculates the current frame timestamp
+    # This gets the current frame number from the video.
     frame_number = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+    # Calculates the timestamp of the current frame.
     frame_time = video_start_time + timedelta(seconds=frame_number/ fps)   
 
-    # Updates the OBD speed if the new timestamp matches
+    # Iterates through OBD data until the LocalTime matches or exceeds the current frame timestamp.
     while obd_index < len(obd_data) and obd_data[obd_index]['LocalTime'] <= frame_time:
+        # Updates the current OBD speed to the matching OBD row.
         current_obd_speed = obd_data[obd_index]['Speed']
+        # Counter incremented to ensure it continues to move through data.
         obd_index += 1
 
     # -------------- YOLO Object Detection & Tracking --------------
@@ -190,7 +203,7 @@ while cap.isOpened() and obd_index < len(obd_data):
 
     # Draw the OBD speed on the video at the top left corner.
     cv2.putText(frame, f"OBD Speed: {current_obd_speed:.2f} MPH", (50, 50),
-                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+                cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 0), 5)
 
     # Draw the bounding box around detected objects with tracking IDs.
     if results[0].boxes is not None and results[0].boxes.id is not None:
@@ -240,7 +253,7 @@ while cap.isOpened() and obd_index < len(obd_data):
 
             # If not in the object history, add to the dictionary.
             if track_id not in object_history:
-                object_history[track_id] = {"positions": [], "speed": None, "crossed": False, "type": vehicle_type, "colour": vehicle_colour}
+                object_history[track_id] = {"positions": [], "speed": None, "actual_speed": None, "crossed": False, "type": vehicle_type, "colour": vehicle_colour}
 
             # Store the objects movement history.
             object_history[track_id]["positions"].append((centre_x, centre_y, current_time))
@@ -265,8 +278,10 @@ while cap.isOpened() and obd_index < len(obd_data):
                         # Converts the pixel movements to metres.
                         conversion_factor = real_world_distance_m / (x2 - x1)
 
-                        # Calculates the object speed in mph.
+                        # Calculates the relative and actual object speed in mph.
                         object_speed_mph = (distance_in_px * conversion_factor) / delta_time * 2.24
+                        # This calculates the actual estimated speed of the vehicle (OBD speed + model speed).
+                        actual_speed = object_speed_mph + current_obd_speed
 
                         # Custom ID is now assigned that its crossed the line/
                         if custom_id_map[track_id] is None:
@@ -276,30 +291,32 @@ while cap.isOpened() and obd_index < len(obd_data):
 
                         # Speed of the object is stored.
                         object_history[track_id]["speed"] = object_speed_mph
+                        object_history[track_id]["actual_speed"] = actual_speed
                         object_history[track_id]["crossed"] = True
 
                         # Speed details of the vehicle are logged and added to the log file.
                         object_speed_entry = (
                             f"⏱ Time: {time.strftime('%Y-%m-%d %H:%M:%S')} | "
-                            f"ID: {custom_id} | Speed: {object_speed_mph:.2f} mph | "
+                            f"ID: {custom_id} | Relative Speed: {object_speed_mph:.2f} mph | "
+                            f"Actual Est. Speed: {actual_speed:.2f} mph | "
                             f"Type: {vehicle_type} | Colour: {vehicle_colour}"
                         )
                         speed_log.append(object_speed_entry)
 
 
-            # Then display the unique ID, speed, type, and colour of the vehicle above bounding box.
+            # Then display the unique ID, relative speed, and actual estimated speed of the vehicle above bounding box.
             if object_history[track_id]["speed"] is not None:
-                label = f"ID: {custom_id_map.get(track_id)}, Speed: {object_history[track_id]['speed']:.2f} mph, Type: {object_history[track_id]['type']}, Colour: {object_history[track_id]['colour']}"
+                label = f"ID: {custom_id_map.get(track_id)}, Rel. Speed: {object_history[track_id]['speed']:.2f} MPH, Actual Est. Speed: {object_history[track_id]['actual_speed']:.2f} MPH, Type: {object_history[track_id]['type']}, Colour: {object_history[track_id]['colour']}"
 
                 # Set colour of the bounding box based on the speed of the vehicle.
-                if object_speed_mph <= speed_limit:
+                if object_history[track_id]['actual_speed'] <= speed_limit:
                     colour = (0, 255, 0)
                 else:
                     colour = (0, 0, 255)
 
-                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                            (255, 255, 255), 2)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.1,
+                            (255, 255, 255), 5)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 3)
 
     # --------------- Show & save Frame --------------
 
