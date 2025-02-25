@@ -2,6 +2,9 @@ from ultralytics import YOLO
 import cv2
 import time
 import numpy as np
+import csv
+import os
+from datetime import datetime, timedelta
 
 # ------------------ YOLO Model Setup --------------
 
@@ -16,7 +19,8 @@ if live_feed == True:
     cap = cv2.VideoCapture(2, cv2.CAP_DSHOW)
 else:
     # Chooses pre-recorded video.
-    cap = cv2.VideoCapture("C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/30road.mp4")
+    video_path = "C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/IMG_6165.mov"
+    cap = cv2.VideoCapture(video_path)
 
 assert cap.isOpened(), "Error reading video file"
 
@@ -82,6 +86,52 @@ colour_map = {"black": (20,20,20),
             }
 
 
+# --------- Loading Data from OBD Export (For Pre-Recorded) ----------
+def load_obd_data(csv_file):
+    data = []
+    with open(csv_file, mode="r", encoding='utf8') as file:
+        reader = csv.reader(file)
+        rows = list(reader)
+
+    # Processes headers in the file
+    header = [h.strip() for h in rows[1] if h.strip() != '']
+
+    # Begin to iterate over actual OBD data rows
+    for row in rows[2:]:
+        if len(row) != len(header):
+            continue
+
+        row_data = dict(zip(header,row))
+        local_time_raw = row_data.get('LocalTime', '').replace('="', '').replace('"', '')
+        try:
+            local_time = datetime.strptime(local_time_raw, "%Y-%m-%d %H:%M:%S.%f")
+            speed = float(row_data.get('Speed[16]  (MPH)', '0').strip())
+            data.append({'LocalTime': local_time, 'Speed': speed})
+        except ValueError:
+            continue
+
+    print(f"loaded {len(data)} valid speeds from CSV") 
+    return data
+
+# Load OBD data
+obd_data_path = "C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/OBDdash_log_2025_2_25_10_37_5.csv"
+obd_data = load_obd_data(obd_data_path)
+if not obd_data:
+    print("No valid OBD data found")
+    exit()
+
+# Get the video start time (using creation time)
+video_start_time = datetime.fromtimestamp(os.path.getmtime(video_path))
+print(f"Video start time: {video_start_time}")
+
+obd_index = 0
+while obd_index < len(obd_data) and obd_data[obd_index]['LocalTime'] < video_start_time:
+    obd_index += 1
+
+if obd_index == len(obd_data):
+    print("No matching OBD data or incorrect creation time for the chosen video.")
+    exit()
+
 # ------------- Helper Functions --------------
 
 # Function that finds the name of the closest colour.
@@ -102,8 +152,10 @@ def get_closest_colour(rgb):
 
 # -------------- Main Processing Loop --------------
 
+current_obd_speed = 0.0
+
 # Process video
-while cap.isOpened():
+while cap.isOpened() and obd_index < len(obd_data):
     frame_start = time.time()
     success, frame = cap.read()
     if not success:
@@ -118,7 +170,16 @@ while cap.isOpened():
             actual_fps = 1.0 / frame_time
         else:
             actual_fps = 30
-    
+
+    # This calculates the current frame timestamp
+    frame_number = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+    frame_time = video_start_time + timedelta(seconds=frame_number/ fps)   
+
+    # Updates the OBD speed if the new timestamp matches
+    while obd_index < len(obd_data) and obd_data[obd_index]['LocalTime'] <= frame_time:
+        current_obd_speed = obd_data[obd_index]['Speed']
+        obd_index += 1
+
     # -------------- YOLO Object Detection & Tracking --------------
 
     # Run YOLO object detection and tracking.
@@ -126,6 +187,10 @@ while cap.isOpened():
 
     # Speed capture line defined above is drawn on the video.
     cv2.line(frame, (speed_capture_x, 0), (speed_capture_x, frame_height), (0, 255, 255), 2)
+
+    # Draw the OBD speed on the video at the top left corner.
+    cv2.putText(frame, f"OBD Speed: {current_obd_speed:.2f} MPH", (50, 50),
+                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
 
     # Draw the bounding box around detected objects with tracking IDs.
     if results[0].boxes is not None and results[0].boxes.id is not None:
