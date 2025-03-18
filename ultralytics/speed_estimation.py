@@ -19,7 +19,7 @@ if live_feed == True:
     cap = cv2.VideoCapture(2, cv2.CAP_DSHOW)
 else:
     # Chooses pre-recorded video.
-    video_path = "C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/IMG_6165.mov"
+    video_path = "C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/IMG_6181.mov"
     cap = cv2.VideoCapture(video_path)
 
 assert cap.isOpened(), "Error reading video file"
@@ -122,7 +122,7 @@ def load_obd_data(csv_file):
     return data
 
 # Load OBD data
-obd_data_path = "C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/OBDdash_log_2025_2_25_10_37_5.csv"
+obd_data_path = "C:/Users/nawza/Documents/GitHub/VehicleSpeedEstimation/ultralytics/data/OBDdash_log_2025_2_26_16_30_25.csv"
 obd_data = load_obd_data(obd_data_path)
 if not obd_data:
     print("No valid OBD data found")
