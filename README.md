@@ -1,5 +1,5 @@
 # Vehicle Speed Estimation Using Onboard Video and OBD-II Data
-This project is a proof-of-concept for an On-board Vehicle Traffic Enforcement (OVTE) system. It uses computer vision to detect vehicles in a video feed, estimates their relative speed, and compares it with the host vehicle's speed (from OBD-II logs) to flag speeding infractions.
+This project is a proof-of-concept for an On-board Vehicle Traffic Enforcement (OVTE) system. It uses computer vision to detect vehicles in a video feed, estimates their relative and actual speed, and compares it with a pre-defined speed limit to flag speeding infractions.
 
 ---
 
